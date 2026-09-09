@@ -4,10 +4,7 @@ app = FastAPI()
 
 @app.get("/")
 def root():
-    return {
-        "status": "ok",
-        "service": "eitaa-manager"
-    }
+    return "Eitaa Manager Backend is ONLINE"
 
 @app.get("/status")
 def status():
