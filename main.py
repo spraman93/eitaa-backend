@@ -1,12 +1,17 @@
 from fastapi import FastAPI
-from fastapi.responses import PlainTextResponse
 
 app = FastAPI()
 
-@app.get("/", response_class=PlainTextResponse)
+@app.get("/")
 def root():
-    return "OK"
+    return {
+        "status": "ok",
+        "service": "eitaa-manager"
+    }
 
-@app.get("/test", response_class=PlainTextResponse)
-def test():
-    return "BACKEND OK"
+@app.get("/status")
+def status():
+    return {
+        "status": "ok",
+        "message": "Backend is running"
+    }
