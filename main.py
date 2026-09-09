@@ -26,8 +26,16 @@ def status():
 
 @app.post("/auth/send-code")
 def send_code(data: PhoneRequest):
+    phone = data.phone.strip()
+
+    if not phone:
+        return {
+            "status": "error",
+            "message": "Phone number is required"
+        }
+
     return {
         "status": "ok",
-        "message": "Phone received",
-        "phone": data.phone
+        "message": "Phone received successfully",
+        "phone": phone
     }
