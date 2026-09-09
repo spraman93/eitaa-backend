@@ -1,6 +1,12 @@
 from fastapi import FastAPI
+from pydantic import BaseModel
 
 app = FastAPI()
+
+
+class PhoneRequest(BaseModel):
+    phone: str
+
 
 @app.get("/")
 def root():
@@ -9,9 +15,19 @@ def root():
         "service": "eitaa-manager"
     }
 
+
 @app.get("/status")
 def status():
     return {
         "status": "ok",
         "message": "Backend is running"
+    }
+
+
+@app.post("/auth/send-code")
+def send_code(data: PhoneRequest):
+    return {
+        "status": "ok",
+        "message": "Phone received",
+        "phone": data.phone
     }
