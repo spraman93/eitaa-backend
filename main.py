@@ -4,12 +4,13 @@ from eitaa_cli.models import OtpCodeSettings
 
 app = FastAPI()
 
-# موقت برای تست
+# موقت برای نگه‌داشتن درخواست OTP
 pending_auth = {}
 
-# بعد از ورود موفق، کلاینت‌های واردشده را نگه می‌داریم
-active_clients = {}
 
+# =========================================================
+# ROOT
+# =========================================================
 
 @app.get("/")
 async def root():
@@ -19,6 +20,10 @@ async def root():
     }
 
 
+# =========================================================
+# STATUS
+# =========================================================
+
 @app.get("/status")
 async def status():
     return {
@@ -27,9 +32,9 @@ async def status():
     }
 
 
-# ==========================================
-# دریافت کد
-# ==========================================
+# =========================================================
+# SEND CODE
+# =========================================================
 
 @app.post("/auth/send-code")
 async def send_code(request: Request):
@@ -50,11 +55,12 @@ async def send_code(request: Request):
             "message": "شماره موبایل وارد نشده است"
         }
 
+    # اگر درخواست قبلی برای همین شماره وجود داشت
     old = pending_auth.pop(phone, None)
 
     if old:
         try:
-            await old["client"].__aexit__(None, None, None)
+            await old["client"].close()
         except Exception:
             pass
 
@@ -92,9 +98,9 @@ async def send_code(request: Request):
         }
 
 
-# ==========================================
-# ورود
-# ==========================================
+# =========================================================
+# LOGIN
+# =========================================================
 
 @app.post("/auth/login")
 async def login(request: Request):
@@ -127,7 +133,7 @@ async def login(request: Request):
     if not auth_data:
         return {
             "status": "error",
-            "message": "درخواست کد پیدا نشد"
+            "message": "درخواست کد پیدا نشد؛ دوباره دریافت کد را بزنید"
         }
 
     client = auth_data["client"]
@@ -135,17 +141,17 @@ async def login(request: Request):
 
     try:
 
+        # ورود با همان Client و همان Challenge
         await client.auth.sign_in(
             challenge.phone_number,
             challenge.phone_code_hash,
             code
         )
 
-        # ورود موفق
-        pending_auth.pop(phone, None)
+        # sign_in به صورت پیش‌فرض session را ذخیره می‌کند
+        # پس بعداً می‌توانیم Client را دوباره بسازیم.
 
-        # کلاینت واردشده را نگه می‌داریم
-        active_clients[phone] = client
+        pending_auth.pop(phone, None)
 
         return {
             "status": "ok",
@@ -160,17 +166,20 @@ async def login(request: Request):
         }
 
 
-# ==========================================
-# دریافت همه گفتگوها
-# ==========================================
+# =========================================================
+# RESEND CODE
+# =========================================================
 
-@app.post("/chats")
-async def chats(request: Request):
+@app.post("/auth/resend-code")
+async def resend_code(request: Request):
 
     try:
         data = await request.json()
     except Exception:
-        data = {}
+        return {
+            "status": "error",
+            "message": "JSON نامعتبر است"
+        }
 
     phone = str(data.get("phone", "")).strip()
 
@@ -180,15 +189,79 @@ async def chats(request: Request):
             "message": "شماره موبایل وارد نشده است"
         }
 
-    client = active_clients.get(phone)
+    auth_data = pending_auth.get(phone)
 
-    if not client:
+    if not auth_data:
         return {
             "status": "error",
-            "message": "کاربر وارد نشده است"
+            "message": "درخواست کد پیدا نشد"
         }
 
+    client = auth_data["client"]
+    challenge = auth_data["challenge"]
+
     try:
+
+        new_challenge = await client.auth.resend_code(
+            challenge.phone_number,
+            challenge.phone_code_hash
+        )
+
+        pending_auth[phone] = {
+            "client": client,
+            "challenge": new_challenge
+        }
+
+        return {
+            "status": "ok",
+            "message": "کد مجدد درخواست شد",
+            "delivery": str(new_challenge.delivery),
+            "next_delivery": str(new_challenge.next_delivery),
+            "timeout_seconds": new_challenge.timeout_seconds
+        }
+
+    except Exception as e:
+
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
+# =========================================================
+# GET ALL CHATS
+# =========================================================
+
+@app.post("/chats")
+async def chats(request: Request):
+
+    try:
+        data = await request.json()
+    except Exception:
+        return {
+            "status": "error",
+            "message": "JSON نامعتبر است"
+        }
+
+    phone = str(data.get("phone", "")).strip()
+
+    if not phone:
+        return {
+            "status": "error",
+            "message": "شماره موبایل وارد نشده است"
+        }
+
+    client = None
+
+    try:
+
+        # Client را از Session ذخیره‌شده می‌سازیم
+        client = await EitaaClient.create(
+            profile=phone,
+            require_auth=True
+        )
+
+        await client.__aenter__()
 
         result = await client.dialogs.list(100)
 
@@ -205,10 +278,18 @@ async def chats(request: Request):
             "message": str(e)
         }
 
+    finally:
 
-# ==========================================
-# فقط گروه‌ها
-# ==========================================
+        if client:
+            try:
+                await client.close()
+            except Exception:
+                pass
+
+
+# =========================================================
+# GET GROUPS
+# =========================================================
 
 @app.post("/chats/groups")
 async def groups(request: Request):
@@ -216,19 +297,29 @@ async def groups(request: Request):
     try:
         data = await request.json()
     except Exception:
-        data = {}
+        return {
+            "status": "error",
+            "message": "JSON نامعتبر است"
+        }
 
     phone = str(data.get("phone", "")).strip()
 
-    client = active_clients.get(phone)
-
-    if not client:
+    if not phone:
         return {
             "status": "error",
-            "message": "کاربر وارد نشده است"
+            "message": "شماره موبایل وارد نشده است"
         }
 
+    client = None
+
     try:
+
+        client = await EitaaClient.create(
+            profile=phone,
+            require_auth=True
+        )
+
+        await client.__aenter__()
 
         result = await client.dialogs.groups(100)
 
@@ -245,10 +336,18 @@ async def groups(request: Request):
             "message": str(e)
         }
 
+    finally:
 
-# ==========================================
-# فقط کانال‌ها
-# ==========================================
+        if client:
+            try:
+                await client.close()
+            except Exception:
+                pass
+
+
+# =========================================================
+# GET CHANNELS
+# =========================================================
 
 @app.post("/chats/channels")
 async def channels(request: Request):
@@ -256,19 +355,29 @@ async def channels(request: Request):
     try:
         data = await request.json()
     except Exception:
-        data = {}
+        return {
+            "status": "error",
+            "message": "JSON نامعتبر است"
+        }
 
     phone = str(data.get("phone", "")).strip()
 
-    client = active_clients.get(phone)
-
-    if not client:
+    if not phone:
         return {
             "status": "error",
-            "message": "کاربر وارد نشده است"
+            "message": "شماره موبایل وارد نشده است"
         }
 
+    client = None
+
     try:
+
+        client = await EitaaClient.create(
+            profile=phone,
+            require_auth=True
+        )
+
+        await client.__aenter__()
 
         result = await client.dialogs.channels(100)
 
@@ -284,3 +393,11 @@ async def channels(request: Request):
             "status": "error",
             "message": str(e)
         }
+
+    finally:
+
+        if client:
+            try:
+                await client.close()
+            except Exception:
+                pass
