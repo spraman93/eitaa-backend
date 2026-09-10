@@ -21,6 +21,7 @@ def status():
 
 @app.api_route("/auth/send-code", methods=["GET", "POST"])
 async def send_code(request: Request):
+
     if request.method == "GET":
         return {
             "status": "ok",
@@ -35,6 +36,12 @@ async def send_code(request: Request):
 
     phone = data.get("phone", "")
 
+    return {
+        "status": "ok",
+        "method": "POST",
+        "message": "Phone received successfully",
+        "phone": phone
+    }
     return {
         "status": "ok",
         "method": "POST",
