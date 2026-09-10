@@ -42,13 +42,3 @@ async def send_code(request: Request):
         "message": "Phone received successfully",
         "phone": phone
     }
-    return {
-        "status": "ok",
-        "method": "POST",
-        "message": "Phone received successfully",
-        "phone": phone
-    }    return {
-        "status": "ok",
-        "message": "Phone received successfully",
-        "phone": phone
-    }
