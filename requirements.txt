@@ -1,3 +1,3 @@
 fastapi
 uvicorn[standard]
-eitaa-cli
+git+https://github.com/EhsanAhmadzadeh/eitaa-cli.git
