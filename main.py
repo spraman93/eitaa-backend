@@ -1,4 +1,6 @@
 from fastapi import FastAPI, Request
+from eitaa_cli import EitaaClient
+from eitaa_cli.models import OtpCodeSettings
 
 app = FastAPI()
 
@@ -19,26 +21,39 @@ def status():
     }
 
 
-@app.api_route("/auth/send-code", methods=["GET", "POST"])
+@app.post("/auth/send-code")
 async def send_code(request: Request):
 
-    if request.method == "GET":
+    data = await request.json()
+    phone = data.get("phone", "").strip()
+
+    if not phone:
         return {
-            "status": "ok",
-            "method": "GET",
-            "message": "send-code endpoint is working"
+            "status": "error",
+            "message": "شماره موبایل وارد نشده است"
         }
 
     try:
-        data = await request.json()
-    except Exception:
-        data = {}
+        client = await EitaaClient.create(require_auth=False)
 
-    phone = data.get("phone", "")
+        async with client:
+            challenge = await client.auth.request_code(
+                phone,
+                settings=OtpCodeSettings()
+            )
 
-    return {
-        "status": "ok",
-        "method": "POST",
-        "message": "Phone received successfully",
-        "phone": phone
-    }
+        return {
+            "status": "ok",
+            "message": "کد درخواست شد",
+            "phone": challenge.phone_number,
+            "delivery": str(challenge.delivery),
+            "next_delivery": str(challenge.next_delivery),
+            "timeout_seconds": challenge.timeout_seconds,
+            "phone_code_hash": challenge.phone_code_hash
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
