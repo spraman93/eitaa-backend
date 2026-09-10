@@ -8,10 +8,6 @@ pending_auth = {}
 active_clients = {}
 
 
-# =========================================================
-# ROOT
-# =========================================================
-
 @app.get("/")
 async def root():
     return {
@@ -19,10 +15,6 @@ async def root():
         "message": "Eitaa Manager Backend is running"
     }
 
-
-# =========================================================
-# STATUS
-# =========================================================
 
 @app.get("/status")
 async def status():
@@ -42,10 +34,7 @@ async def send_code(request: Request):
 
     try:
         data = await request.json()
-
-        phone = str(
-            data.get("phone", "")
-        ).strip()
+        phone = str(data.get("phone", "")).strip()
 
         if not phone:
             return {
@@ -53,52 +42,41 @@ async def send_code(request: Request):
                 "message": "شماره موبایل وارد نشده است"
             }
 
-        # اگر درخواست قبلی وجود دارد
         old_auth = pending_auth.get(phone)
 
         if old_auth:
-
             try:
                 await old_auth["client"].__aexit__(
-                    None,
-                    None,
-                    None
+                    None, None, None
                 )
             except Exception:
                 pass
 
             pending_auth.pop(phone, None)
 
-        # اگر Client فعال قبلی وجود دارد
         old_client = active_clients.get(phone)
 
         if old_client:
-
             try:
                 await old_client.__aexit__(
-                    None,
-                    None,
-                    None
+                    None, None, None
                 )
             except Exception:
                 pass
 
             active_clients.pop(phone, None)
 
-        # ساخت Client
         client = await EitaaClient.create(
             require_auth=False
         )
 
         await client.__aenter__()
 
-        # درخواست OTP
         challenge = await client.auth.request_code(
             phone,
             settings=OtpCodeSettings()
         )
 
-        # نگهداری Client و Challenge
         pending_auth[phone] = {
             "client": client,
             "challenge": challenge
@@ -132,13 +110,8 @@ async def login(request: Request):
     try:
         data = await request.json()
 
-        phone = str(
-            data.get("phone", "")
-        ).strip()
-
-        code = str(
-            data.get("code", "")
-        ).strip()
+        phone = str(data.get("phone", "")).strip()
+        code = str(data.get("code", "")).strip()
 
         if not phone:
             return {
@@ -152,29 +125,25 @@ async def login(request: Request):
                 "message": "کد تأیید وارد نشده است"
             }
 
-        # پیدا کردن اطلاعات OTP
         auth_data = pending_auth.get(phone)
 
         if not auth_data:
             return {
                 "status": "error",
-                "message": "درخواست کد پیدا نشد. دوباره دریافت کد را بزنید."
+                "message": "درخواست کد پیدا نشد"
             }
 
         client = auth_data["client"]
         challenge = auth_data["challenge"]
 
-        # ورود
         await client.auth.sign_in(
             challenge.phone_number,
             challenge.phone_code_hash,
             code
         )
 
-        # نگهداری Client واردشده
         active_clients[phone] = client
 
-        # حذف اطلاعات موقت
         pending_auth.pop(phone, None)
 
         return {
@@ -201,16 +170,7 @@ async def resend_code(request: Request):
 
     try:
         data = await request.json()
-
-        phone = str(
-            data.get("phone", "")
-        ).strip()
-
-        if not phone:
-            return {
-                "status": "error",
-                "message": "شماره موبایل وارد نشده است"
-            }
+        phone = str(data.get("phone", "")).strip()
 
         auth_data = pending_auth.get(phone)
 
@@ -252,7 +212,7 @@ async def resend_code(request: Request):
 
 
 # =========================================================
-# CHATS - TEST
+# CHATS
 # =========================================================
 
 @app.post("/chats")
@@ -273,40 +233,39 @@ async def chats(request: Request):
                 "message": "شماره موبایل وارد نشده است"
             }
 
-        # پیدا کردن Client واردشده
         client = active_clients.get(phone)
 
         if not client:
-
             return {
                 "status": "error",
                 "where": "chats",
                 "message": "حساب وارد نشده است"
             }
 
-        # -------------------------------------------------
-        # مرحله 1: بررسی وجود Client
-        # -------------------------------------------------
+        # دریافت گفتگوها
+        result = await client.dialogs.list(
+            limit=100
+        )
 
         return {
             "status": "ok",
             "where": "chats",
-            "message": "Client فعال است",
-            "phone": phone
+            "message": "لیست گفتگوها دریافت شد",
+            "data": result
         }
 
     except Exception as e:
 
         return {
             "status": "error",
-            "where": "chats-test",
+            "where": "chats",
             "error_type": type(e).__name__,
             "message": str(e)
         }
 
 
 # =========================================================
-# GROUPS - TEST
+# GROUPS
 # =========================================================
 
 @app.post("/chats/groups")
@@ -320,12 +279,6 @@ async def groups(request: Request):
             data.get("phone", "")
         ).strip()
 
-        if not phone:
-            return {
-                "status": "error",
-                "message": "شماره موبایل وارد نشده است"
-            }
-
         client = active_clients.get(phone)
 
         if not client:
@@ -334,24 +287,28 @@ async def groups(request: Request):
                 "message": "حساب وارد نشده است"
             }
 
+        result = await client.dialogs.groups(
+            limit=100
+        )
+
         return {
             "status": "ok",
-            "message": "Client گروه‌ها فعال است",
-            "phone": phone
+            "message": "لیست گروه‌ها دریافت شد",
+            "data": result
         }
 
     except Exception as e:
 
         return {
             "status": "error",
-            "where": "groups-test",
+            "where": "groups",
             "error_type": type(e).__name__,
             "message": str(e)
         }
 
 
 # =========================================================
-# CHANNELS - TEST
+# CHANNELS
 # =========================================================
 
 @app.post("/chats/channels")
@@ -365,12 +322,6 @@ async def channels(request: Request):
             data.get("phone", "")
         ).strip()
 
-        if not phone:
-            return {
-                "status": "error",
-                "message": "شماره موبایل وارد نشده است"
-            }
-
         client = active_clients.get(phone)
 
         if not client:
@@ -379,17 +330,21 @@ async def channels(request: Request):
                 "message": "حساب وارد نشده است"
             }
 
+        result = await client.dialogs.channels(
+            limit=100
+        )
+
         return {
             "status": "ok",
-            "message": "Client کانال‌ها فعال است",
-            "phone": phone
+            "message": "لیست کانال‌ها دریافت شد",
+            "data": result
         }
 
     except Exception as e:
 
         return {
             "status": "error",
-            "where": "channels-test",
+            "where": "channels",
             "error_type": type(e).__name__,
             "message": str(e)
         }
