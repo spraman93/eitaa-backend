@@ -5,9 +5,10 @@ from eitaa_cli.models import OtpCodeSettings
 app = FastAPI()
 
 # موقت برای تست
-# کلید = شماره تلفن
-# مقدار = Client و Challenge مربوط به همان درخواست
 pending_auth = {}
+
+# بعد از ورود موفق، کلاینت‌های واردشده را نگه می‌داریم
+active_clients = {}
 
 
 @app.get("/")
@@ -26,9 +27,9 @@ async def status():
     }
 
 
-# ==================================================
-# درخواست کد ورود
-# ==================================================
+# ==========================================
+# دریافت کد
+# ==========================================
 
 @app.post("/auth/send-code")
 async def send_code(request: Request):
@@ -49,8 +50,6 @@ async def send_code(request: Request):
             "message": "شماره موبایل وارد نشده است"
         }
 
-    # اگر قبلاً برای این شماره Client داشتیم،
-    # آن را می‌بندیم.
     old = pending_auth.pop(phone, None)
 
     if old:
@@ -61,22 +60,17 @@ async def send_code(request: Request):
 
     try:
 
-        # Client جدید
         client = await EitaaClient.create(
             require_auth=False
         )
 
-        # Client را باز نگه می‌داریم
         await client.__aenter__()
 
-        # درخواست کد
         challenge = await client.auth.request_code(
             phone,
             settings=OtpCodeSettings()
         )
 
-        # همان Client + همان Challenge
-        # برای مرحله login نگه داشته می‌شود
         pending_auth[phone] = {
             "client": client,
             "challenge": challenge
@@ -98,9 +92,9 @@ async def send_code(request: Request):
         }
 
 
-# ==================================================
-# ورود با کد تأیید
-# ==================================================
+# ==========================================
+# ورود
+# ==========================================
 
 @app.post("/auth/login")
 async def login(request: Request):
@@ -128,13 +122,12 @@ async def login(request: Request):
             "message": "کد تأیید وارد نشده است"
         }
 
-    # Challenge همان درخواست قبلی
     auth_data = pending_auth.get(phone)
 
     if not auth_data:
         return {
             "status": "error",
-            "message": "درخواست کد پیدا نشد؛ دوباره کد دریافت کنید"
+            "message": "درخواست کد پیدا نشد"
         }
 
     client = auth_data["client"]
@@ -142,9 +135,7 @@ async def login(request: Request):
 
     try:
 
-        # ورود با همان Client
-        # و همان phone_code_hash
-        authorization = await client.auth.sign_in(
+        await client.auth.sign_in(
             challenge.phone_number,
             challenge.phone_code_hash,
             code
@@ -153,7 +144,9 @@ async def login(request: Request):
         # ورود موفق
         pending_auth.pop(phone, None)
 
-        # توکن را در پاسخ برنمی‌گردانیم
+        # کلاینت واردشده را نگه می‌داریم
+        active_clients[phone] = client
+
         return {
             "status": "ok",
             "message": "ورود به ایتا موفق بود"
@@ -167,20 +160,17 @@ async def login(request: Request):
         }
 
 
-# ==================================================
-# درخواست کد مجدد
-# ==================================================
+# ==========================================
+# دریافت همه گفتگوها
+# ==========================================
 
-@app.post("/auth/resend-code")
-async def resend_code(request: Request):
+@app.post("/chats")
+async def chats(request: Request):
 
     try:
         data = await request.json()
     except Exception:
-        return {
-            "status": "error",
-            "message": "JSON نامعتبر است"
-        }
+        data = {}
 
     phone = str(data.get("phone", "")).strip()
 
@@ -190,37 +180,102 @@ async def resend_code(request: Request):
             "message": "شماره موبایل وارد نشده است"
         }
 
-    auth_data = pending_auth.get(phone)
+    client = active_clients.get(phone)
 
-    if not auth_data:
+    if not client:
         return {
             "status": "error",
-            "message": "درخواست کد پیدا نشد؛ دوباره دریافت کد را بزنید"
+            "message": "کاربر وارد نشده است"
         }
-
-    client = auth_data["client"]
-    challenge = auth_data["challenge"]
 
     try:
 
-        # درخواست روش بعدی که خود ایتا اعلام کرده
-        new_challenge = await client.auth.resend_code(
-            challenge.phone_number,
-            challenge.phone_code_hash
-        )
-
-        # Challenge جدید را جایگزین می‌کنیم
-        pending_auth[phone] = {
-            "client": client,
-            "challenge": new_challenge
-        }
+        result = await client.dialogs.list(100)
 
         return {
             "status": "ok",
-            "message": "کد مجدد درخواست شد",
-            "delivery": str(new_challenge.delivery),
-            "next_delivery": str(new_challenge.next_delivery),
-            "timeout_seconds": new_challenge.timeout_seconds
+            "message": "لیست گفتگوها دریافت شد",
+            "data": result
+        }
+
+    except Exception as e:
+
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
+# ==========================================
+# فقط گروه‌ها
+# ==========================================
+
+@app.post("/chats/groups")
+async def groups(request: Request):
+
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    phone = str(data.get("phone", "")).strip()
+
+    client = active_clients.get(phone)
+
+    if not client:
+        return {
+            "status": "error",
+            "message": "کاربر وارد نشده است"
+        }
+
+    try:
+
+        result = await client.dialogs.groups(100)
+
+        return {
+            "status": "ok",
+            "message": "گروه‌ها دریافت شدند",
+            "data": result
+        }
+
+    except Exception as e:
+
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+
+# ==========================================
+# فقط کانال‌ها
+# ==========================================
+
+@app.post("/chats/channels")
+async def channels(request: Request):
+
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    phone = str(data.get("phone", "")).strip()
+
+    client = active_clients.get(phone)
+
+    if not client:
+        return {
+            "status": "error",
+            "message": "کاربر وارد نشده است"
+        }
+
+    try:
+
+        result = await client.dialogs.channels(100)
+
+        return {
+            "status": "ok",
+            "message": "کانال‌ها دریافت شدند",
+            "data": result
         }
 
     except Exception as e:
