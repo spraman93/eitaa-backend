@@ -25,58 +25,56 @@ async def status():
     }
 
 
-# =========================================================
-# SEND CODE
-# =========================================================
-
 @app.post("/auth/send-code")
 async def send_code(request: Request):
-
     try:
         data = await request.json()
+
         phone = str(data.get("phone", "")).strip()
 
         if not phone:
             return {
                 "status": "error",
+                "where": "send-code",
                 "message": "شماره موبایل وارد نشده است"
             }
 
+        # بستن احراز هویت قبلی
         old_auth = pending_auth.get(phone)
 
         if old_auth:
             try:
-                await old_auth["client"].__aexit__(
-                    None, None, None
-                )
+                await old_auth["client"].__aexit__(None, None, None)
             except Exception:
                 pass
 
             pending_auth.pop(phone, None)
 
+        # بستن کلاینت فعال قبلی
         old_client = active_clients.get(phone)
 
         if old_client:
             try:
-                await old_client.__aexit__(
-                    None, None, None
-                )
+                await old_client.__aexit__(None, None, None)
             except Exception:
                 pass
 
             active_clients.pop(phone, None)
 
+        # ساخت کلاینت جدید
         client = await EitaaClient.create(
             require_auth=False
         )
 
         await client.__aenter__()
 
+        # درخواست کد
         challenge = await client.auth.request_code(
             phone,
             settings=OtpCodeSettings()
         )
 
+        # نگهداری کلاینت و challenge
         pending_auth[phone] = {
             "client": client,
             "challenge": challenge
@@ -91,7 +89,6 @@ async def send_code(request: Request):
         }
 
     except Exception as e:
-
         return {
             "status": "error",
             "where": "send-code",
@@ -100,13 +97,8 @@ async def send_code(request: Request):
         }
 
 
-# =========================================================
-# LOGIN
-# =========================================================
-
 @app.post("/auth/login")
 async def login(request: Request):
-
     try:
         data = await request.json()
 
@@ -116,12 +108,14 @@ async def login(request: Request):
         if not phone:
             return {
                 "status": "error",
+                "where": "login",
                 "message": "شماره موبایل وارد نشده است"
             }
 
         if not code:
             return {
                 "status": "error",
+                "where": "login",
                 "message": "کد تأیید وارد نشده است"
             }
 
@@ -130,12 +124,14 @@ async def login(request: Request):
         if not auth_data:
             return {
                 "status": "error",
+                "where": "login",
                 "message": "درخواست کد پیدا نشد"
             }
 
         client = auth_data["client"]
         challenge = auth_data["challenge"]
 
+        # ورود با همان client و همان challenge
         await client.auth.sign_in(
             challenge.phone_number,
             challenge.phone_code_hash,
@@ -152,7 +148,6 @@ async def login(request: Request):
         }
 
     except Exception as e:
-
         return {
             "status": "error",
             "where": "login",
@@ -161,22 +156,26 @@ async def login(request: Request):
         }
 
 
-# =========================================================
-# RESEND CODE
-# =========================================================
-
 @app.post("/auth/resend-code")
 async def resend_code(request: Request):
-
     try:
         data = await request.json()
+
         phone = str(data.get("phone", "")).strip()
+
+        if not phone:
+            return {
+                "status": "error",
+                "where": "resend-code",
+                "message": "شماره موبایل وارد نشده است"
+            }
 
         auth_data = pending_auth.get(phone)
 
         if not auth_data:
             return {
                 "status": "error",
+                "where": "resend-code",
                 "message": "درخواست قبلی پیدا نشد"
             }
 
@@ -202,7 +201,6 @@ async def resend_code(request: Request):
         }
 
     except Exception as e:
-
         return {
             "status": "error",
             "where": "resend-code",
@@ -212,19 +210,15 @@ async def resend_code(request: Request):
 
 
 # =========================================================
-# CHATS
+# TEST CHATS
 # =========================================================
 
 @app.post("/chats")
 async def chats(request: Request):
-
     try:
-
         data = await request.json()
 
-        phone = str(
-            data.get("phone", "")
-        ).strip()
+        phone = str(data.get("phone", "")).strip()
 
         if not phone:
             return {
@@ -239,23 +233,31 @@ async def chats(request: Request):
             return {
                 "status": "error",
                 "where": "chats",
-                "message": "حساب وارد نشده است"
+                "message": "حساب وارد نشده است",
+                "phone": phone
             }
 
-        # دریافت گفتگوها
+        # ---------------------------------------------
+        # مرحله 1: اجرای واقعی dialogs.list
+        # ---------------------------------------------
+
         result = await client.dialogs.list(
             limit=100
         )
 
+        # ---------------------------------------------
+        # فعلاً result را برنمی‌گردانیم
+        # چون ممکن است آبجکت خام قابل JSON نباشد.
+        # ---------------------------------------------
+
         return {
             "status": "ok",
             "where": "chats",
-            "message": "لیست گفتگوها دریافت شد",
-            "data": result
+            "message": "dialogs.list با موفقیت اجرا شد",
+            "result_type": type(result).__name__
         }
 
     except Exception as e:
-
         return {
             "status": "error",
             "where": "chats",
@@ -270,20 +272,24 @@ async def chats(request: Request):
 
 @app.post("/chats/groups")
 async def groups(request: Request):
-
     try:
-
         data = await request.json()
 
-        phone = str(
-            data.get("phone", "")
-        ).strip()
+        phone = str(data.get("phone", "")).strip()
+
+        if not phone:
+            return {
+                "status": "error",
+                "where": "groups",
+                "message": "شماره موبایل وارد نشده است"
+            }
 
         client = active_clients.get(phone)
 
         if not client:
             return {
                 "status": "error",
+                "where": "groups",
                 "message": "حساب وارد نشده است"
             }
 
@@ -293,12 +299,12 @@ async def groups(request: Request):
 
         return {
             "status": "ok",
-            "message": "لیست گروه‌ها دریافت شد",
-            "data": result
+            "where": "groups",
+            "message": "groups با موفقیت اجرا شد",
+            "result_type": type(result).__name__
         }
 
     except Exception as e:
-
         return {
             "status": "error",
             "where": "groups",
@@ -313,20 +319,24 @@ async def groups(request: Request):
 
 @app.post("/chats/channels")
 async def channels(request: Request):
-
     try:
-
         data = await request.json()
 
-        phone = str(
-            data.get("phone", "")
-        ).strip()
+        phone = str(data.get("phone", "")).strip()
+
+        if not phone:
+            return {
+                "status": "error",
+                "where": "channels",
+                "message": "شماره موبایل وارد نشده است"
+            }
 
         client = active_clients.get(phone)
 
         if not client:
             return {
                 "status": "error",
+                "where": "channels",
                 "message": "حساب وارد نشده است"
             }
 
@@ -336,15 +346,15 @@ async def channels(request: Request):
 
         return {
             "status": "ok",
-            "message": "لیست کانال‌ها دریافت شد",
-            "data": result
+            "where": "channels",
+            "message": "channels با موفقیت اجرا شد",
+            "result_type": type(result).__name__
         }
 
     except Exception as e:
-
         return {
             "status": "error",
             "where": "channels",
             "error_type": type(e).__name__,
             "message": str(e)
-        }
+            }
