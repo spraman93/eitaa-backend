@@ -1,11 +1,6 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import FastAPI, Request
 
 app = FastAPI()
-
-
-class PhoneRequest(BaseModel):
-    phone: str
 
 
 @app.get("/")
@@ -24,17 +19,28 @@ def status():
     }
 
 
-@app.post("/auth/send-code")
-def send_code(data: PhoneRequest):
-    phone = data.phone.strip()
-
-    if not phone:
+@app.api_route("/auth/send-code", methods=["GET", "POST"])
+async def send_code(request: Request):
+    if request.method == "GET":
         return {
-            "status": "error",
-            "message": "Phone number is required"
+            "status": "ok",
+            "method": "GET",
+            "message": "send-code endpoint is working"
         }
 
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    phone = data.get("phone", "")
+
     return {
+        "status": "ok",
+        "method": "POST",
+        "message": "Phone received successfully",
+        "phone": phone
+    }    return {
         "status": "ok",
         "message": "Phone received successfully",
         "phone": phone
